@@ -1,111 +1,170 @@
 # solana-bridge-skill
 
-A production-grade AI skill for the [Solana AI Kit](https://github.com/solanabr/solana-ai-kit) that turns any coding agent (Claude Code / Codex) into an expert Solana frontend architect.
+`solana-bridge-skill` is a Solana AI Kit skill for generating the frontend bridge layer around Anchor programs.
 
-It bridges the gap between Anchor 0.30+ smart contracts and modern React/Next.js frontends using the **Web3.js v2** functional stack — eliminating hours of manual boilerplate and preventing AI hallucinations about deprecated v1 APIs.
+It focuses on the work that usually sits between a finished Solana program and a usable web app: typed IDL models, PDA helpers, account fetchers, subscriptions, Token-2022 layout handling, Anchor error maps, and React hooks.
 
----
+The skill defaults to the `@solana/web3.js` v2 functional stack for direct RPC work and documents the narrow v1 compatibility bridge still needed by Anchor client flows.
 
-## The Problem It Solves
+## Problem
 
-When a developer finishes writing a Solana program in Anchor, they receive a raw `idl.json` file. To make this usable in a frontend, they must manually:
+After a Solana program is written, the frontend still needs to translate the raw IDL and account layouts into safe application code. That handoff has several common failure modes:
 
-- Map every IDL type to a TypeScript interface
-- Write state fetching functions with correct `memcmp` filters
-- Build React Context Providers and custom hooks
-- Handle Token-2022 extensions if their mint uses them
-- Parse cryptic hex error codes into readable messages
+- IDL integer types can be mapped unsafely.
+- Anchor account filters often forget the 8-byte discriminator.
+- PDA derivation code can lose seed order or mix address types at the Anchor boundary.
+- Token-2022 extensions require layout-aware parsing.
+- Anchor custom errors need readable frontend messages.
+- Web3.js v1 and v2 imports are frequently mixed in incompatible ways.
+- Subscriptions need cleanup paths to avoid leaking listeners.
 
-This takes **hours**, is highly error-prone, and standard AI models almost always generate **deprecated `@solana/web3.js` v1 code** that breaks in 2026 projects.
+This repository turns those recurring tasks into focused skill modules with explicit rules, examples, and validation checks.
 
-This skill fixes all of that. Install it once, and your coding agent becomes an expert in the exact modern patterns required.
+## Scope
 
----
-
-## What It Does
-
-| User Request | Skill Route | Output |
+| Task | Skill file | Output |
 |---|---|---|
-| "Map my IDL to TypeScript types" | `parsing-idl.md` | Typed interfaces using `Address` and `bigint` |
-| "Parse Token-2022 transfer hook" | `parsing-idl.md` | Correct byte-offset decoder |
-| "Fetch all accounts by authority" | `state-fetching.md` | `createSolanaRpc` + memcmp filter |
-| "Subscribe to live account changes" | `state-fetching.md` | WebSocket subscription with cleanup |
-| "Build a React provider for my program" | `react-hooks.md` | `AnchorProgramProvider` + `useAnchorProgram` |
-| "Hook to send my updateProfile instruction" | `react-hooks.md` | Full hook with `isPending`, `txSignature`, `error` |
+| Map Anchor IDL accounts and types | `skill/parsing-idl.md` | `Address`, `bigint`, custom types, enums, error maps |
+| Derive PDA accounts | `skill/pda-derivation.md` | Seed-aware helpers with address and bump output |
+| Decode Token-2022 layout data | `skill/parsing-idl.md` | Browser-safe extension parsers |
+| Fetch program accounts | `skill/state-fetching.md` | `createSolanaRpc`, `address`, `memcmp` filters |
+| Subscribe to account updates | `skill/state-fetching.md` | WebSocket helpers with cleanup |
+| Build React program context | `skill/react-hooks.md` | `AnchorProgramProvider`, `useAnchorProgram` |
+| Build transaction hooks | `skill/react-hooks.md` | Hooks with pending, success, error, and reset state |
+| Review generated bridge code | `skill/validation.md` | Final checklist for imports, assumptions, errors, and cleanup |
 
----
+## Repository Structure
 
-## Directory Structure
-
-```
+```text
 solana-bridge-skill/
-├── README.md               # This file
-├── install.sh              # Automated installer
-└── skill/
-    ├── SKILL.md            # Master router — entry point for the AI agent
-    ├── parsing-idl.md      # IDL type mapping, error maps, Token-2022 decoders
-    ├── state-fetching.md   # Web3.js v2 RPC queries, filters, subscriptions
-    └── react-hooks.md      # React Context providers, transaction hooks, live updates
+├── .editorconfig
+├── .github/workflows/validate.yml
+├── examples/
+│   ├── expected-profile-bridge.md
+│   ├── pda-transaction-hook.md
+│   ├── sample-anchor-idl.json
+│   └── token2022-transfer-hook.md
+├── skill/
+│   ├── SKILL.md
+│   ├── parsing-idl.md
+│   ├── pda-derivation.md
+│   ├── react-hooks.md
+│   ├── state-fetching.md
+│   └── validation.md
+├── tests/
+│   └── validate.sh
+├── CHANGELOG.md
+├── COMPATIBILITY.md
+├── CONTRIBUTING.md
+├── LICENSE
+├── README.md
+├── SECURITY.md
+├── SUBMISSION.md
+└── install.sh
 ```
-
----
 
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/solana-bridge-skill
+git clone https://github.com/hart234-cyber/solana-bridge-skill
 cd solana-bridge-skill
-chmod +x install.sh
 ./install.sh
 ```
 
-This copies the `skill/` folder into `../../skills/solana-bridge-skill` relative to the repo — the standard location for skills in the Solana AI Kit.
+By default, the installer copies `skill/` into:
 
-To install to a custom path:
+```text
+../../skills/solana-bridge-skill
+```
+
+Use a custom Solana AI Kit skills path when needed:
 
 ```bash
-./install.sh /path/to/your/solana-ai-kit/skills/solana-bridge-skill
+./install.sh /path/to/solana-ai-kit/skills/solana-bridge-skill
 ```
 
----
+The installer refuses unsafe targets and only installs into a directory named `solana-bridge-skill`.
 
-## How to Use It
+## Usage
 
-Once installed, open Claude Code inside your Solana project and try these prompts:
+After installation, use prompts like:
 
+```text
+Look at my idl.json and generate TypeScript interfaces for all account types.
+
+Build a React provider and custom hook for this Anchor program.
+
+My mint uses Token-2022 transfer hooks. Write the extension decoder.
+
+Derive the UserProfile PDA from my IDL and wire it into the updateProfile hook.
+
+Fetch all UserProfile accounts for this authority using Web3.js v2.
+
+I got custom program error 0x1774. Map it using the IDL errors.
 ```
-"Look at my idl.json and generate TypeScript interfaces for all account types."
 
-"Build me a React Context Provider and custom hook to fetch all user profile accounts."
+The entry point is `skill/SKILL.md`. It routes each task to a focused submodule, then uses `skill/validation.md` as a final review checklist.
 
-"My mint uses Token-2022 transfer hooks — write a decoder for it."
+## Design Rules
 
-"Subscribe to live changes on this account address and update my UI automatically."
+- Load only the submodule needed for the current task.
+- Do not invent accounts, seeds, discriminators, fields, or extension layouts.
+- Preserve PDA seed order from the IDL and return bump values when derivation exposes them.
+- Use Web3.js v2 for direct RPC reads, filters, subscriptions, and transaction-message composition.
+- Keep Anchor v1 compatibility isolated to the documented `@solana/web3.js-v1` alias path.
+- Map large integer types to `bigint`.
+- Map Anchor option values to `T | null`.
+- Avoid Node-only APIs in browser examples unless a polyfill is explicitly required.
+- Expose cleanup functions for subscriptions and effect lifecycles.
+- Surface readable transaction errors when the IDL provides error metadata.
 
-"I got error 0x1774 — what does that mean and how do I fix it?"
+## Quality Checks
+
+Run:
+
+```bash
+bash tests/validate.sh
 ```
 
-The agent will read `SKILL.md`, route to the correct submodule, and generate accurate, production-ready code without mixing in deprecated v1 patterns.
+The validator checks:
 
----
+- Required repository files.
+- `SKILL.md` metadata and route links.
+- Stale placeholders.
+- Shell syntax.
+- JSON syntax when `jq` is available.
+- Compatibility notes.
+- Example IDL presence.
+- PDA and Token-2022 scenario examples.
+- A temporary install of the skill files.
 
-## Tech Stack Covered
+The same check runs in GitHub Actions through `.github/workflows/validate.yml`.
 
-- `@coral-xyz/anchor` v0.30+
-- `@solana/web3.js` v2 (`createSolanaRpc`, `pipe`, `address`)
-- `@solana/spl-token` (Token-2022 extensions)
-- `@solana/wallet-adapter-react`
-- React 18+ / Next.js App Router
-- TypeScript strict mode
+## Examples
 
----
+- `examples/sample-anchor-idl.json` contains a compact Anchor IDL with accounts, custom types, PDA seeds, instruction args, and errors.
+- `examples/expected-profile-bridge.md` shows the expected output shape for that IDL.
+- `examples/pda-transaction-hook.md` shows PDA derivation and Anchor boundary conversion.
+- `examples/token2022-transfer-hook.md` shows transfer hook parsing and extra-account-meta handling.
 
-## No Cost, No Hosting Required
+These files are intentionally small. They give maintainers a quick way to inspect the skill's assumptions without reading every module first.
 
-This skill is **100% local**. It runs inside Claude Code on your own machine. No API keys, no servers, no subscriptions.
+## Fit for Solana AI Kit
 
----
+This skill follows the kit shape:
+
+- `skill/SKILL.md` entry point.
+- Focused markdown submodules.
+- Progressive loading.
+- Local installer.
+- MIT license.
+- No runtime service, API key, database, binary, or generated dependency tree.
+- CI-backed repository checks.
+
+For reviewers, `SUBMISSION.md` contains the short project brief and review command.
+
+`COMPATIBILITY.md` documents the Web3.js v2, Anchor, and Token-2022 boundaries used by the skill.
 
 ## License
 
-MIT — open source and ready to be merged or submoduled into the standard kit.
+MIT. See `LICENSE`.

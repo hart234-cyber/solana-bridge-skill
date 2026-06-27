@@ -2,16 +2,18 @@
 
 This document provides explicit conversion rules for translating modern Anchor 0.30+ JSON IDL files and complex Token-2022 extensions into strict TypeScript typings compatible with Web3.js v2.
 
-## Core Rules for the AI Agent
+## Core Rules
 
 1. **Apply Web3.js v2 Type System**: Map the Solana `pubkey` IDL type to the `Address` type from `@solana/web3.js` v2. Never use the legacy `PublicKey` class.
 2. **Handle Large Integers Safely**: Convert `u64`, `i64`, `u128`, and `i128` explicitly to native JavaScript `bigint`. Never use `BN` from `@coral-xyz/anchor` in new v2 code.
 3. **Map Token-2022 Extensions**: When an application requires configuration for modern token accounts, follow the structural layout mapped below.
 4. **Export Error Maps**: Always extract the `errors` array from the IDL and produce a typed error lookup map for runtime error handling.
 5. **Browser-Safe Decoding**: Use `getBase58Decoder` from `@solana/web3.js` directly — all codecs are natively re-exported from the unified v2 core package. Never import from `@solana/codecs` as a separate dependency.
-5. **Optional Fields**: If a type is wrapped in `{ "option": "type" }` in the IDL, translate it as an optional TypeScript property (`fieldName?: Type`).
+6. **Optional Fields**: If a type is wrapped in `{ "option": "type" }` in the IDL, translate it as `Type | null`. Use optional object properties only when the entire field may be absent from a partially decoded object.
+7. **Enums and Defined Types**: If the IDL references a custom type through `{ "defined": "TypeName" }`, generate or import that type. Never collapse unknown custom types to `any`.
+8. **Prefer SPL Helpers When Available**: If `@solana/spl-token` exposes a stable helper for a Token-2022 extension, use that helper. Generate manual byte decoders only when the helper is unavailable or the user explicitly asks for layout-level code.
 
-## Type Conversion Matrix (2026 Stack)
+## Type Conversion Matrix
 
 | Anchor IDL Type | TypeScript Type | Import / Notes |
 |---|---|---|
@@ -21,8 +23,10 @@ This document provides explicit conversion rules for translating modern Anchor 0
 | `bool` | `boolean` | Native JS primitive |
 | `string` | `string` | Native JS primitive |
 | `bytes` | `Uint8Array` | No import needed |
-| `{ "option": T }` | `T \| null` | Optional field |
+| `{ "option": T }` | `T \| null` | Anchor option values are present as `Some(T)` or `None` |
 | `{ "vec": T }` | `T[]` | Array type |
+| `{ "array": [T, N] }` | Fixed tuple or `T[]` | Preserve fixed length when useful |
+| `{ "defined": "Name" }` | `Name` | Generate or import the named type |
 
 ## Reference Blueprint: Typed State Interface
 
@@ -38,9 +42,38 @@ export interface UserProfileState {
   loyaltyPoints: bigint;       // IDL type: "u64"
   username: string;            // IDL type: "string"
   isActive: boolean;           // IDL type: "bool"
-  metadataPointer?: Address;   // IDL type: { "option": "pubkey" }
+  metadataPointer: Address | null; // IDL type: { "option": "pubkey" }
   tags: string[];              // IDL type: { "vec": "string" }
 }
+```
+
+## Reference Blueprint: IDL Enum and Custom Type Mapping
+
+When the IDL contains custom `types`, emit named exports for each one before account interfaces that reference them:
+
+```typescript
+export type ProfileTier =
+  | { kind: "Free" }
+  | { kind: "Pro" }
+  | { kind: "Team"; fields: { seats: number } };
+
+export interface SocialLink {
+  label: string;
+  url: string;
+}
+
+export interface UserProfileState {
+  tier: ProfileTier;
+  links: SocialLink[];
+}
+```
+
+If the IDL enum uses unnamed tuple fields, preserve order and name the tuple using `fields`:
+
+```typescript
+export type ClaimStatus =
+  | { kind: "Pending" }
+  | { kind: "Claimed"; fields: [bigint, Address] };
 ```
 
 ## Reference Blueprint: IDL Error Map
@@ -57,13 +90,17 @@ export const PROGRAM_ERRORS: Record<number, string> = {
 
 export function parseProgramError(error: unknown): string {
   if (typeof error !== "object" || error === null) return "Unknown error occurred.";
-  const logs: string[] = (error as any)?.logs ?? [];
-  const match = logs.join("").match(/custom program error: (0x[0-9a-fA-F]+)/);
+  const logs = Array.isArray((error as { logs?: unknown }).logs)
+    ? ((error as { logs: string[] }).logs)
+    : [];
+  const message = (error as { message?: unknown }).message;
+  const searchable = [...logs, typeof message === "string" ? message : ""].join("\n");
+  const match = searchable.match(/custom program error: (0x[0-9a-fA-F]+)/);
   if (match) {
     const code = parseInt(match[1], 16);
     return PROGRAM_ERRORS[code] ?? `Unrecognized program error code: ${code}`;
   }
-  return (error as any)?.message ?? "An unknown onchain execution error occurred.";
+  return typeof message === "string" ? message : "An unknown onchain execution error occurred.";
 }
 ```
 
@@ -81,7 +118,8 @@ export interface TransferHookExtension {
 
 /**
  * Parses a Transfer Hook extension from raw Token-2022 mint account data.
- * Layout: [extensionType: u16][length: u16][programId: 32 bytes][authority option: 33 bytes]
+ * Layout inside the extension data:
+ * [authority: 32 bytes OptionalNonZeroPubkey][programId: 32 bytes Pubkey]
  * Reference: https://spl.solana.com/token-2022/extensions
  *
  * Uses getBase58Decoder from @solana/web3.js (browser-safe, no Node.js Buffer required).
@@ -92,6 +130,7 @@ export function parseTransferHookExtension(data: Uint8Array): TransferHookExtens
   const ACCOUNT_TYPE_SIZE = 1;
   const EXTENSION_HEADER_SIZE = 4; // 2 bytes type + 2 bytes length
   const PUBKEY_SIZE = 32;
+  const TRANSFER_HOOK_SIZE = PUBKEY_SIZE * 2;
 
   const base58Decoder = getBase58Decoder();
   let offset = MINT_BASE_SIZE + ACCOUNT_TYPE_SIZE;
@@ -101,22 +140,18 @@ export function parseTransferHookExtension(data: Uint8Array): TransferHookExtens
     const extensionLength = (data[offset + 2] | (data[offset + 3] << 8));
     offset += EXTENSION_HEADER_SIZE;
 
-    // TransferHook extension type = 25
-    if (extensionType === 25 && offset + PUBKEY_SIZE <= data.length) {
-      const programIdBytes = data.slice(offset, offset + PUBKEY_SIZE);
-      // Browser-safe: use getBase58Decoder instead of Node.js Buffer
-      const programId = base58Decoder.decode(programIdBytes) as Address;
+    // TransferHook extension type = 25.
+    // The extension body is authority first, then hook program id.
+    if (extensionType === 25 && extensionLength >= TRANSFER_HOOK_SIZE && offset + TRANSFER_HOOK_SIZE <= data.length) {
+      const authorityBytes = data.slice(offset, offset + PUBKEY_SIZE);
+      const programIdBytes = data.slice(offset + PUBKEY_SIZE, offset + TRANSFER_HOOK_SIZE);
 
-      // Authority is an Option<Pubkey>: 1 byte discriminant + 32 bytes
       let authority: Address | null = null;
-      if (offset + PUBKEY_SIZE + 1 <= data.length) {
-        const hasAuthority = data[offset + PUBKEY_SIZE] === 1;
-        if (hasAuthority && offset + PUBKEY_SIZE + 1 + PUBKEY_SIZE <= data.length) {
-          const authBytes = data.slice(offset + PUBKEY_SIZE + 1, offset + PUBKEY_SIZE + 1 + PUBKEY_SIZE);
-          // Browser-safe: use getBase58Decoder instead of Node.js Buffer
-          authority = base58Decoder.decode(authBytes) as Address;
-        }
+      if (authorityBytes.some((byte) => byte !== 0)) {
+        authority = base58Decoder.decode(authorityBytes) as Address;
       }
+
+      const programId = base58Decoder.decode(programIdBytes) as Address;
 
       return { programId, authority };
     }

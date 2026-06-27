@@ -1,0 +1,128 @@
+{
+  "address": "Bridge11111111111111111111111111111111111111",
+  "metadata": {
+    "name": "bridge_profile",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "updateProfile",
+      "discriminator": [32, 178, 19, 77, 11, 29, 64, 140],
+      "accounts": [
+        {
+          "name": "userProfile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [112, 114, 111, 102, 105, 108, 101]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": false,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "username",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "userProfile",
+      "discriminator": [143, 82, 189, 53, 45, 87, 120, 122]
+    }
+  ],
+  "types": [
+    {
+      "name": "userProfile",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "loyaltyPoints",
+            "type": "u64"
+          },
+          {
+            "name": "username",
+            "type": "string"
+          },
+          {
+            "name": "metadataPointer",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "tier",
+            "type": {
+              "defined": {
+                "name": "profileTier"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "profileTier",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Free"
+          },
+          {
+            "name": "Pro"
+          },
+          {
+            "name": "Team",
+            "fields": [
+              {
+                "name": "seats",
+                "type": "u16"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidUsernameLength",
+      "msg": "Username must be between 3 and 20 characters."
+    },
+    {
+      "code": 6001,
+      "name": "Unauthorized",
+      "msg": "Signer does not match the stored authority."
+    }
+  ]
+}

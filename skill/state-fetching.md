@@ -2,18 +2,20 @@
 
 This document defines the functional patterns for requesting, filtering, and subscribing to onchain account data using the modern, high-performance `@solana/web3.js` v2 architecture.
 
-## Core Rules for the AI Agent
+## Core Rules
 
 1. **Enforce Functional Composition**: Construct all RPC calls using `createSolanaRpc()`. Never use `new Connection()` from legacy web3.js v1.
-2. **Use `address()` not `new PublicKey()`**: All public key conversions must use the `address()` helper from `@solana/web3.js`.
+2. **Use `address()` for Direct v2 RPC**: Direct Web3.js v2 public key conversions must use the `address()` helper from `@solana/web3.js`.
 3. **Use `getBase58Decoder` for pubkey bytes**: When decoding raw pubkey bytes from account data, use `getBase58Decoder` from `@solana/web3.js` directly — all codecs are natively re-exported from the unified v2 core package. Never add `@solana/codecs` as a separate dependency.
 4. **Implement Clean Subscription Teardown**: Always return an abort/unsubscribe function from subscription helpers to prevent memory leaks.
 5. **Skip the 8-byte Anchor Discriminator**: All `memcmp` filters on Anchor program accounts must start at `offset: 8` to skip the discriminator prefix.
+6. **Respect the Anchor Boundary**: When calling Anchor `program.account.*.fetch`, use v1-compatible public keys from the aliased `@solana/web3.js-v1` package. Keep that exception isolated from direct Web3.js v2 RPC code.
 
 ## Required Packages
 
 ```bash
 npm install @solana/web3.js@^2.0.0 @coral-xyz/anchor@^0.30.0 @solana/spl-token
+npm install @solana/web3.js-v1@npm:@solana/web3.js@^1.95.0
 ```
 
 ## Reference Blueprint: High-Performance Filtered Account Query
@@ -66,7 +68,7 @@ When the user has an Anchor `Program` instance and wants to fetch a single typed
 
 ```typescript
 import { Program } from '@coral-xyz/anchor';
-import { address } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js-v1';
 import type { UserProfileState } from './parsing-idl';
 
 /**
@@ -78,7 +80,7 @@ export async function fetchUserProfile(
   profileAddress: string
 ): Promise<UserProfileState | null> {
   try {
-    const pubkey = address(profileAddress);
+    const pubkey = new PublicKey(profileAddress);
     const account = await (program.account as any).userProfile.fetch(pubkey);
     return account as UserProfileState;
   } catch (err: unknown) {

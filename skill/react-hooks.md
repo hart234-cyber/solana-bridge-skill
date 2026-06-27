@@ -2,7 +2,7 @@
 
 This document mandates structural patterns for generating global UI integration points and custom event handlers tailored to Web3.js v2 and Anchor 0.30+.
 
-## Core Rules for the AI Agent
+## Core Rules
 
 1. **Use the Hybrid Connection Bridge**: `@coral-xyz/anchor` v0.30 is internally coupled to `@solana/web3.js` v1. To safely combine Anchor with the modern v2 stack, instantiate a legacy v1 `Connection` object **exclusively** for the Anchor `AnchorProvider`. Use `createSolanaRpc` from Web3.js v2 for all direct RPC calls, state fetching, and WebSocket subscriptions outside of Anchor.
 2. **Correct Component Imports**: For all hooks executing transactions through Anchor's `.methods` chain, always import `PublicKey` and `SystemProgram` from `@solana/web3.js-v1`. These classes do not exist in v2 — importing them from `@solana/web3.js` v2 throws fatal TypeScript compilation errors because v2 replaced them with functional primitives.
@@ -223,10 +223,14 @@ Add this to your `app/layout.tsx` or root providers file. Pass the RPC endpoint 
 import { AnchorProgramProvider } from '@/hooks/AnchorProgramProvider';
 import myIdl from '@/idl/my_program.json';
 
-const PROGRAM_ID = 'YOUR_PROGRAM_ID_HERE'; // string — no PublicKey needed
+const PROGRAM_ID = process.env.NEXT_PUBLIC_PROGRAM_ID;
 const RPC_ENDPOINT = process.env.NEXT_PUBLIC_RPC_URL ?? 'https://api.mainnet-beta.solana.com';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  if (!PROGRAM_ID) {
+    throw new Error('NEXT_PUBLIC_PROGRAM_ID is required');
+  }
+
   return (
     <WalletContextProvider> {/* Your existing wallet adapter setup */}
       <AnchorProgramProvider
@@ -241,4 +245,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 ```
 
-> **Note for the AI agent**: Use `createSolanaRpc(rpcEndpoint)` from `@solana/web3.js` v2 for all direct RPC calls (account fetching, WebSocket subscriptions) outside of Anchor. The `AnchorProgramProvider` handles the v1 bridge internally and transparently.
+> Use `createSolanaRpc(rpcEndpoint)` from `@solana/web3.js` v2 for direct RPC calls outside of Anchor. The `AnchorProgramProvider` owns the v1 compatibility bridge.
